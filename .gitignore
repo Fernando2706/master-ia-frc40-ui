@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+# Virtual environments
+.venv/
+venv/
+env/
+# Local IDE/editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+# Generated app outputs
+app_outputs/
+app/app_outputs/
+outputs/
+app_smoke_outputs*/
+# Generated models and data artifacts
+*.joblib
+model_*.csv
+processed_data.csv
+prepared_model_data.csv
+model_results.csv
+model_predictions.csv
+frc40_full_app.csv
+dataset_modelos_app.csv
+# Generated plots/reports
+correlation_matrix.png
+model_comparison.png
+time_series_predictions.png
+# Build artifacts
+build/
+dist/
+*.spec
+*.exe
+# Logs
+*.log
