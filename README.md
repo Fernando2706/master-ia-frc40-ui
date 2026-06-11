@@ -76,12 +76,33 @@ app/
   src/
     frc40_app/
       config.py                  Constantes: variables, objetivos y columnas
+      paths.py                   Resuelve la carpeta de datos del usuario (AppData / XDG)
       preprocessing.py           Conversion de datos.xlsx + quimicos.xlsx a CSV limpio
       features.py                Creacion y normalizacion de variables para modelos
       modeling.py                Entrenamiento, seleccion de modelos y metricas
       ui.py                      Interfaz grafica Tkinter
       utils.py                   Utilidades compartidas
 ```
+
+## Donde se guardan los datos
+
+La aplicacion no escribe junto al ejecutable: cada usuario tiene su propia
+carpeta de datos independiente de donde se coloque el `.exe`.
+
+- **Windows:** `%LOCALAPPDATA%\FRC40\Quimicos`
+- **Linux:** `$XDG_DATA_HOME/FRC40/Quimicos` (fallback `~/.local/share/FRC40/Quimicos`)
+- **macOS:** `~/Library/Application Support/FRC40/Quimicos`
+
+Dentro de esa carpeta se crean las subcarpetas `training_runs\YYYYMMDD_HHMMSS\`
+y los modelos se guardan en `models\` dentro de cada run.
+
+La pantalla *Actualizar datos* permite cambiar la carpeta de destino desde la
+interfaz; si la cambias, esa nueva ruta sera la que se use a partir de ese
+momento.
+
+Las instalaciones antiguas que aun tengan la carpeta `app_outputs` junto al
+ejecutable siguen siendo detectadas automaticamente en *Referencias
+guardadas* para no perder referencias previas.
 
 ## Uso
 

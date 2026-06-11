@@ -2,12 +2,29 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import ExtraTreesRegressor, GradientBoostingRegressor, RandomForestRegressor
+from sklearn.ensemble import (
+    AdaBoostRegressor,
+    BaggingRegressor,
+    ExtraTreesRegressor,
+    GradientBoostingRegressor,
+    HistGradientBoostingRegressor,
+    RandomForestRegressor,
+    StackingRegressor,
+)
+from sklearn.linear_model import (
+    BayesianRidge,
+    ElasticNet,
+    Lasso,
+    LinearRegression,
+    Ridge,
+)
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import GridSearchCV, KFold, train_test_split
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
 
 from .config import CHEMICAL_TARGETS
 
@@ -18,59 +35,172 @@ except ImportError:
 
 
 def regression_candidates(random_state: int) -> dict[str, tuple[object, dict]]:
-    candidates = {
-        "Extra Trees": (
-            ExtraTreesRegressor(random_state=random_state),
+    """Return a dictionary of candidate models and their hyperparameter grids.
+
+    The set covers four families, with grids sized so a full GridSearchCV
+    over the candidates remains tractable on a 365-row dataset:
+
+    * **Linear baselines** (Ridge, Lasso, ElasticNet, BayesianRidge) - cheap
+      and serve as a sanity check for the problem.
+    * **Tree ensembles** (Extra Trees, Random Forest, Gradient Boosting,
+      Hist Gradient Boosting) - typically the strongest performers.
+    * **Instance-based** (KNN) - non-parametric comparison.
+    * **Other** (SVR, AdaBoost, Bagging) - diverse methods for completeness.
+    * **Stacking** - meta-ensemble that combines several of the above.
+
+    The `XGBoost` candidate is added when the optional dependency is
+    installed in the environment.
+    """
+    # Pre-build a Ridge pipeline for KNN-like models that need scaling.
+    ridge_for_meta = Ridge(random_state=random_state)
+    base_tree = DecisionTreeRegressor(random_state=random_state, max_depth=4)
+
+    candidates: dict[str, tuple[object, dict]] = {
+        # ---- Linear baselines (fast, good for sanity checking) ---------
+        "Ridge": (
+            make_pipeline(StandardScaler(), Ridge(random_state=random_state)),
             {
-                "n_estimators": [100, 300],
-                "max_depth": [None, 5],
+                "ridge__alpha": [0.1, 1.0, 10.0, 100.0],
+            },
+        ),
+        "Lasso": (
+            make_pipeline(StandardScaler(), Lasso(random_state=random_state, max_iter=10000)),
+            {
+                "lasso__alpha": [0.001, 0.01, 0.1, 1.0],
+            },
+        ),
+        "ElasticNet": (
+            make_pipeline(StandardScaler(), ElasticNet(random_state=random_state, max_iter=10000)),
+            {
+                "elasticnet__alpha": [0.01, 0.1, 1.0],
+                "elasticnet__l1_ratio": [0.2, 0.5, 0.8],
+            },
+        ),
+        "Bayesian Ridge": (
+            make_pipeline(StandardScaler(), BayesianRidge()),
+            {},  # defaults are already sensible; no grid needed
+        ),
+        # ---- Tree ensembles (the heavy hitters) ------------------------
+        "Extra Trees": (
+            ExtraTreesRegressor(random_state=random_state, n_jobs=-1),
+            {
+                "n_estimators": [200, 400],
+                "max_depth": [None, 6, 12],
                 "min_samples_leaf": [1, 3],
-                "max_features": [0.8, 1.0],
+                "max_features": [0.6, 0.8, 1.0],
             },
         ),
         "Random Forest": (
-            RandomForestRegressor(random_state=random_state),
+            RandomForestRegressor(random_state=random_state, n_jobs=-1),
             {
-                "n_estimators": [100, 300],
-                "max_depth": [None, 5],
+                "n_estimators": [200, 400],
+                "max_depth": [None, 6, 12],
                 "min_samples_leaf": [1, 3],
-                "max_features": [0.8, 1.0],
+                "max_features": [0.6, 0.8, 1.0],
+                "bootstrap": [True, False],
             },
         ),
         "Gradient Boosting": (
             GradientBoostingRegressor(random_state=random_state),
             {
-                "n_estimators": [100, 300],
+                "n_estimators": [150, 300],
                 "learning_rate": [0.05, 0.1],
-                "max_depth": [2, 3],
+                "max_depth": [2, 3, 4],
                 "min_samples_leaf": [3, 10],
+                "subsample": [0.8, 1.0],
             },
         ),
+        "Hist Gradient Boosting": (
+            HistGradientBoostingRegressor(random_state=random_state),
+            {
+                "max_iter": [200, 400],
+                "learning_rate": [0.05, 0.1],
+                "max_depth": [None, 6, 10],
+                "min_samples_leaf": [10, 20],
+                "l2_regularization": [0.0, 1.0],
+            },
+        ),
+        # ---- Instance-based --------------------------------------------
         "KNN": (
             make_pipeline(StandardScaler(), KNeighborsRegressor()),
             {
-                "kneighborsregressor__n_neighbors": [3, 5, 7],
+                "kneighborsregressor__n_neighbors": [3, 5, 7, 11],
                 "kneighborsregressor__weights": ["uniform", "distance"],
                 "kneighborsregressor__p": [1, 2],
             },
         ),
+        # ---- Other diverse methods -------------------------------------
+        "SVR (RBF)": (
+            make_pipeline(StandardScaler(), SVR(kernel="rbf")),
+            {
+                "svr__C": [0.1, 1.0, 10.0],
+                "svr__epsilon": [0.01, 0.1, 0.5],
+                "svr__gamma": ["scale", "auto"],
+            },
+        ),
+        "AdaBoost": (
+            AdaBoostRegressor(
+                estimator=base_tree,
+                random_state=random_state,
+            ),
+            {
+                "n_estimators": [50, 100, 200],
+                "learning_rate": [0.05, 0.1, 0.5],
+                "loss": ["linear", "square"],
+            },
+        ),
+        "Bagging Trees": (
+            BaggingRegressor(
+                estimator=base_tree,
+                random_state=random_state,
+                n_jobs=-1,
+            ),
+            {
+                "n_estimators": [50, 100],
+                "max_samples": [0.6, 0.8, 1.0],
+                "max_features": [0.6, 0.8, 1.0],
+            },
+        ),
     }
+
     if XGBRegressor is not None:
         candidates["XGBoost"] = (
             XGBRegressor(
                 objective="reg:squarederror",
                 random_state=random_state,
                 n_jobs=-1,
+                tree_method="hist",
             ),
             {
-                "n_estimators": [100, 300],
-                "max_depth": [2, 3, 5],
+                "n_estimators": [200, 400],
+                "max_depth": [3, 5, 7],
                 "learning_rate": [0.03, 0.05, 0.1],
-                "subsample": [0.8, 1.0],
-                "colsample_bytree": [0.8, 1.0],
+                "subsample": [0.7, 0.9],
+                "colsample_bytree": [0.7, 0.9],
                 "reg_lambda": [1.0, 5.0],
             },
         )
+
+    # ---- Stacking: meta-ensemble built from a couple of strong base learners
+    # We build the candidates lazily and use a small grid (only ``passthrough``)
+    # because the inner learners are already tuned via their own entries.
+    stacking_estimators = [
+        ("gbr", GradientBoostingRegressor(random_state=random_state, n_estimators=200, max_depth=3)),
+        ("hgbr", HistGradientBoostingRegressor(random_state=random_state, max_iter=200)),
+        ("ridge", make_pipeline(StandardScaler(), Ridge(random_state=random_state))),
+    ]
+    candidates["Stacking"] = (
+        StackingRegressor(
+            estimators=stacking_estimators,
+            final_estimator=ridge_for_meta,
+            cv=KFold(n_splits=5, shuffle=True, random_state=random_state),
+            n_jobs=-1,
+        ),
+        {
+            "passthrough": [False, True],
+        },
+    )
+
     return candidates
 
 
